@@ -1,0 +1,255 @@
+---
+title: "Practical Machine Learning - Course Project"
+output: html_document
+date: "2025-01-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## 1. Executive Summary
+
+The proliferation of wearable technology, such as Jawbone Up, Nike FuelBand, and Fitbit, has enabled individuals to collect extensive data on their personal activities at a relatively low cost. This trend is part of the quantified self movement, where enthusiasts monitor various personal metrics to enhance their health, discover behavioral patterns, or indulge their interest in technology. While many users focus on quantifying the frequency of their activities, there is often a lack of emphasis on the quality of performance. This project aims to address this gap by analyzing data from accelerometers attached to the belt, forearm, arm, and dumbbell of six participants. These individuals performed barbell lifts in both correct and incorrect forms across five different techniques. The findings from this analysis will provide valuable insights into the quality of exercise performance, contributing to broader discussions on health and fitness optimization.
+
+## 2. Introduction
+
+The quantified self movement has gained significant traction in recent years, driven by advancements in wearable technology that allow for the continuous monitoring of personal health and activity metrics. Devices such as Jawbone Up, Nike FuelBand, and Fitbit have democratized access to data collection, enabling users to track their physical activities and health indicators with unprecedented ease. While quantifying the amount of activity—such as steps taken or calories burned—has become commonplace, the measurement of performance quality remains underexplored.
+
+This project seeks to investigate the quality of physical activity by utilizing data collected from accelerometers positioned on various body parts, including the belt, forearm, arm, and dumbbell. Six participants were tasked with performing barbell lifts both correctly and incorrectly in five distinct variations. By analyzing this data, we aim to shed light on the relationship between activity quantity and performance quality, ultimately providing insights that can enhance exercise techniques and promote better health outcomes.3. Data Analysis
+
+The analysis is to predict the manner in which participants performed barbell lifts, represented by the "classe" variable in the training set. This analysis utilizes various features from the dataset to build a predictive model, employing machine learning techniques to enhance accuracy and reliability.
+
+### 3.1 Data Loading and Cleanong
+
+The first step is to load the training and test case datasets.
+
+```{r}
+
+set.seed(23)
+url_pml_training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_pml_test     <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+trainDS <- read.csv(url_pml_training)
+TestCases <- read.csv(url_pml_test)
+
+```
+
+### 3.2 Data Cleaning
+
+Before building the model, the data underwent a cleaning process to handle missing values, outliers, and inconsistencies. This ensured that the dataset was robust and suitable for analysis.
+
+We will:
+
+– convert column *classe* (which contains the values to predict) from string to factor (with levels A to E)
+
+– remove columns with less than 50% of valid values
+
+– remove rows invalid values
+
+– remove first 7 columns which contain information not relevant for the classification
+
+```{r}
+
+library(ggplot2)
+library(lattice)
+library(caret)
+
+# Remove columns which contain almost only NA or are empty
+trainDS_cleaned <- trainDS
+
+# Trim spaces from character columns
+trainDS_cleaned[] <- lapply(trainDS_cleaned, function(column) {
+                        if (is.character(column)) {
+                                trimws(column)  # Trim leading and trailing whitespace
+                        } else {
+                        column  # Return non-character columns unchanged
+                        }
+})
+
+trainDS_cleaned$classe <- as.factor(trainDS$classe)
+
+# Function to check if a value is numeric, character, or factor
+is_valid <- function(x) {
+  is.numeric(x) || is.character(x) || is.factor(x)
+}
+# Replace invalid values with NA
+trainDS_cleaned[] <- lapply(trainDS_cleaned, function(column) {
+                # Replace empty strings and whitespace with NA
+                column[column == ""] <- NA
+                # Replace invalid values with NA
+                column[!sapply(column, is_valid)] <- NA
+                return(column)
+})
+
+# Calculate the proportion of non-missing values for each column
+valid_proportions <- colSums(!is.na(trainDS_cleaned)) / nrow(trainDS_cleaned)
+# Identify columns to keep (at least 90% valid values)
+columns_to_keep <- valid_proportions >= 0.9
+# Subset the data frame to keep only the desired columns
+trainDS_cleaned <- trainDS_cleaned[, columns_to_keep]
+
+# Remove rows with any NA values using complete.cases
+trainDS_cleaned <- trainDS_cleaned[complete.cases(trainDS_cleaned), ]
+
+# Remove first seven columns which contain data unrelated to classification
+trainDS_cleaned <- trainDS_cleaned[,-7:-1]
+
+```
+
+After eliminating unnecessary data, the training set now consists of 86 out of the original 160 columns. This reduction simplifies model construction and decreases computation time.
+
+For clarity, this analysis exercise utilizes three datasets:
+
+-   **TrainSet**: The dataset used to build the classification models.
+
+-   **TestSet**: The dataset employed to assess the accuracy of the classification models.
+
+-   **TestCaseSet**: This dataset contains data for 20 test cases, for which the best-performing classification model will be used to predict the values of the "classe" variable.
+
+### 3.3 Features Selection
+
+To effectively assess and visualize the significance of various predictors in our dataset, we can utilize the `featurePlot()`function. This function provides a comprehensive graphical representation of the relationship between predictor variables and the target variable, allowing us to identify which features contribute most to the model's predictive power.
+
+```{r}
+
+library(caret)
+
+control <- rfeControl(
+  functions = rfFuncs,       # Specify the model to use, e.g., Random Forest
+  method = "cv",             # Cross-validation
+  number = 5                 # Number of folds
+)
+
+# Sample 1/00 to feed into rfe
+sample_size <- floor(0.01 * nrow(trainDS_cleaned))
+sampled_df <- trainDS_cleaned[sample(nrow(trainDS_cleaned), sample_size), ]
+predictors <- sampled_df[, names(trainDS_cleaned) != "classe"]
+target <- sampled_df[, "classe"]
+
+# Run RFE
+results <- rfe(
+  predictors, 
+  target,
+  sizes = c(1:52),             # Specify the number of features to select
+  rfeControl = control
+)
+
+# Get selected features
+selected_features <- results$optVariables
+
+```
+
+After eliminating unnecessary features, the training set now consists of 37 out of the original 83 columns. This reduction simplifies model construction and decreases computation time. The resultant training and test data sets will be
+
+```{r}
+
+# create training and testing partitions dataset 
+partition  <- createDataPartition(trainDS_cleaned$classe, p=0.7, list=FALSE)
+
+TrainSet_x_cleaned <- trainDS_cleaned[partition, ][, selected_features ]
+TrainSet_y_cleaned <- data.frame(classe=trainDS_cleaned[partition, ][,"classe"])
+TrainSet_cleaned <- cbind(TrainSet_x_cleaned, TrainSet_y_cleaned)
+
+TestSet_x_cleaned <- trainDS_cleaned[-partition, ][,selected_features ]
+TestSet_y_cleaned <- data.frame(classe=trainDS_cleaned[-partition, ][,"classe"])
+TestSet_cleaned <- cbind(TestSet_x_cleaned, TestSet_y_cleaned)
+```
+
+## **4. Model Creation and Selection**
+
+### 4.1 **Random forest**
+
+Random Forest is an ensemble learning method primarily used for classification and regression tasks. It operates by constructing multiple decision trees during training and outputting the mode of the classes (for classification) or mean prediction (for regression) of the individual trees.
+
+```{r}
+
+# Train a Random Forest model
+set.seed(123)
+rf_model <- train(classe ~ ., 
+                  data = TrainSet_cleaned, 
+                  method = "rf",
+                  trControl = trainControl(method = "cv", number = 10),
+                  ntree = 100)
+
+# Print the model details
+print(rf_model)
+
+# Make predictions on the test set
+rf_predictions <- predict(rf_model, TestSet_cleaned)
+
+# Evaluate the model performance
+confusion_matrix_rf <- confusionMatrix(rf_predictions, TestSet_cleaned$classe)
+print(confusion_matrix_rf)
+
+```
+
+### 4.2 Decision Tree
+
+A Decision Tree is a supervised learning algorithm used for classification and regression tasks. It represents decisions and their possible consequences as a tree-like model of decisions.
+
+```{r}
+
+# Train a Decision Tree model
+set.seed(123)
+dt_model <- train(classe ~ ., 
+                  data = TrainSet_cleaned, 
+                  method = "rpart",
+                  trControl = trainControl(method = "cv", number = 10))
+
+# Print the model details
+print(dt_model)
+
+# Make predictions on the test set
+dt_predictions <- predict(dt_model, TestSet_cleaned)
+
+# Evaluate the model performance
+confusion_matrix_dt <- confusionMatrix(dt_predictions, TestSet_cleaned$classe)
+print(confusion_matrix_dt)
+```
+
+### 4.3 Generalized Boosted Model (GBM)
+
+A Generalized Boosted Model (GBM) is an ensemble learning technique that combines the predictions of multiple weak learners to create a strong predictive model. The "boosting" technique focuses on correcting the errors made by previous models in the sequence, usually through additive modeling.
+
+```{r}
+
+# Train a Generalized Boosted Model
+set.seed(123)
+gbm_model <- train(classe ~ ., 
+                  data = TrainSet_cleaned, 
+                  method = "gbm",
+                  trControl = trainControl(method = "cv", number = 10),
+                  verbose = FALSE)
+
+# Print the model details
+print(gbm_model)
+
+# Make predictions on the test set
+gbm_predictions <- predict(gbm_model, TestSet_cleaned)
+
+# Evaluate the model performance
+confusion_matrix_dt <- confusionMatrix(gbm_predictions, TestSet_cleaned$classe)
+print(confusion_matrix_dt) 
+```
+
+## **5. Model choice and predicion**
+
+When comparing the accuracy of the three models, it is clear that the Random Forest model outperforms the others on the test dataset:
+
+| Model type                | Accuracy |
+|:--------------------------|:---------|
+| Random forest             | 0.99     |
+| Decision tree             | 0.50     |
+| Generalized Boosted Model | 0.95     |
+
+Given these results, we will use the Random Forest model to predict the values of the variable `classe` for the 20 samples in the test case dataset.
+
+```{r}
+
+predict_samples <- TestCases[, selected_features ]
+predict_samples_classe <- predict(rf_model, predict_samples)
+print(predict_samples_classe)
+```
+
+## **References**
